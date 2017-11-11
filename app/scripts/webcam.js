@@ -4,26 +4,40 @@
  * (c) Jonas Hartmann http://jonashartmann.github.io/webcam-directive
  * License: MIT
  *
- * @version: 3.1.0
+ * @version: 3.2.0
  */
-'use strict';
 
-(function() {
-  // GetUserMedia is not yet supported by all browsers
-  // Until then, we need to handle the vendor prefixes
-  navigator.getMedia = ( navigator.getUserMedia ||
-                       navigator.webkitGetUserMedia ||
-                       navigator.mozGetUserMedia ||
-                       navigator.msGetUserMedia);
+(function () {
+  'use strict';
 
-  // Checks if getUserMedia is available on the client browser
-  window.hasUserMedia = function hasUserMedia() {
-    return navigator.getMedia ? true : false;
-  };
-})();
+  angular.module('webcam', [])
+    .factory('webcamService', WebcamService)
+    .directive('webcam', WebcamDirective);
 
-angular.module('webcam', [])
-  .directive('webcam', function () {
+  WebcamService.$inject = ['$q'];
+  function WebcamService($q) {
+    var navigatorGetUserMedia = (navigator.getUserMedia || navigator.webKitGetUserMedia || navigator.moxGetUserMedia ||
+      navigator.mozGetUserMedia || navigator.msGetUserMedia);
+    var constraints = { audio: false, video: true };
+    return {
+      isUserMediaSupported: function () {
+        return navigatorGetUserMedia ||
+          (navigator.mediaDevices === undefined && navigator.mediaDevices.getUserMedia === undefined);
+      },
+      getUserMedia: function () {
+        return $q(function (resolve, reject) {
+          if (navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia(constraints).then(resolve).catch(reject);
+          } else {
+            navigatorGetUserMedia(constraints, resolve, reject);
+          }
+        });
+      }
+    };
+  }
+
+  WebcamDirective.$inject = ['webcamService'];
+  function WebcamDirective(webcamService) {
     return {
       template: '<div class="webcam" ng-transclude></div>',
       restrict: 'E',
@@ -39,8 +53,8 @@ angular.module('webcam', [])
       },
       link: function postLink($scope, element) {
         var videoElem = null,
-            videoStream = null,
-            placeholder = null;
+          videoStream = null,
+          placeholder = null;
 
         $scope.config = $scope.config || {};
 
@@ -51,9 +65,9 @@ angular.module('webcam', [])
         };
 
         var onDestroy = function onDestroy() {
-          if (!!videoStream ) {
+          if (!!videoStream) {
             var checker = typeof videoStream.getVideoTracks === 'function';
-            if(videoStream.getVideoTracks && checker) {
+            if (videoStream.getVideoTracks && checker) {
               // get video track to call stop in it
               // videoStream.stop() is deprecated and may be removed in the
               // near future
@@ -77,11 +91,14 @@ angular.module('webcam', [])
         var onSuccess = function onSuccess(stream) {
           videoStream = stream;
 
-          // Firefox supports a src object
-          if (navigator.mozGetUserMedia) {
+          var vendorURL = window.URL || window.webkitURL;
+          // Older browsers may not have srcObject
+          if ('srcObject' in videoElem) {
+            videoElem.srcObject = stream;
+          } else if ('mozSrcObject' in videoElem) {
             videoElem.mozSrcObject = stream;
           } else {
-            var vendorURL = window.URL || window.webkitURL;
+            // Avoid using this in new browsers, as it is going away
             videoElem.src = vendorURL.createObjectURL(stream);
           }
 
@@ -91,7 +108,7 @@ angular.module('webcam', [])
 
           /* Call custom callback */
           if ($scope.onStream) {
-            $scope.onStream({stream: stream});
+            $scope.onStream({ stream: stream });
           }
         };
 
@@ -104,7 +121,7 @@ angular.module('webcam', [])
 
           /* Call custom callback */
           if ($scope.onError) {
-            $scope.onError({err:err});
+            $scope.onError({ err: err });
           }
 
           return;
@@ -129,22 +146,22 @@ angular.module('webcam', [])
             height = element.height = 0;
 
           // Check the availability of getUserMedia across supported browsers
-          if (!window.hasUserMedia()) {
-            onFailure({code:-1, msg: 'Browser does not support getUserMedia.'});
+          if (!webcamService.isUserMediaSupported()) {
+            onFailure({ code: -1, msg: 'Browser does not support getUserMedia.' });
             return;
           }
 
           var mediaConstraint = { video: true, audio: false };
-          navigator.getMedia(mediaConstraint, onSuccess, onFailure);
+          webcamService.getUserMedia(mediaConstraint).then(onSuccess).catch(onFailure);
 
           /* Start streaming the webcam data when the video element can play
            * It will do it only once
            */
-          videoElem.addEventListener('canplay', function() {
+          videoElem.addEventListener('canplay', function () {
             if (!isStreaming) {
               var scale = width / videoElem.videoWidth;
               height = (videoElem.videoHeight * scale) ||
-                        $scope.config.videoHeight;
+                $scope.config.videoHeight;
               videoElem.setAttribute('width', width);
               videoElem.setAttribute('height', height);
               isStreaming = true;
@@ -174,4 +191,6 @@ angular.module('webcam', [])
 
       }
     };
-  });
+  }
+
+})();
